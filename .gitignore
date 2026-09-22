@@ -1,0 +1,7 @@
+.tools/
+build/
+__pycache__/
+*/__pycache__/
+src/*_processed.cherri
+src/*.plist
+src/*.shortcut
