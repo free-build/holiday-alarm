@@ -1,0 +1,164 @@
+#define name 智能节假日闹钟 v4
+#define color orange
+#define glyph alarmClock
+#define version 18.4
+#define mac false
+
+#include 'actions/calendar'
+#include 'actions/web'
+#include 'actions/text'
+
+// ============================================================
+// 用户配置：每行一个闹钟，格式：HH:mm|名称
+// 增加闹钟：增加一行
+// 减少闹钟：删除一行；旧的受管闹钟会自动关闭，但不会被删除
+// ============================================================
+@alarmConfig = "08:00|起床
+08:15|二次起床
+13:30|午睡起床"
+
+// 所有受管闹钟均设置为每天重复；当天是否响完全由本快捷指令开关控制。
+@everyDay = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
+
+// ============================================================
+// 1. 判断今天是否需要上班
+// 优先级：调休补班 > 法定休息 > 普通星期
+// ============================================================
+@today = formatDate(CurrentDate,"Custom","yyyyMMdd")
+@todayN = number(@today)
+@special: bool
+@work: bool
+@special = false
+@work = false
+
+const holidayFile = downloadURL("https://calendars.icloud.com/holidays/cn_zh.ics")
+@ics = getText(holidayFile)
+@events = splitText(@ics,"BEGIN:VEVENT")
+
+for event in @events {
+    if @event contains "X-APPLE-SPECIAL-DAY:" {
+        const sm = matchText('DTSTART;VALUE=DATE:(\d{8})',"{@event}")
+        const em = matchText('DTEND;VALUE=DATE:(\d{8})',"{@event}")
+
+        if sm && em {
+            const startRaw = getMatchGroup(sm,1)
+            const endRaw = getMatchGroup(em,1)
+            @startN = number(startRaw)
+            @endN = number(endRaw)
+
+            // iCalendar 的 DTEND 是排他结束日期：start <= today < end
+            if @todayN >= @startN && @todayN < @endN {
+                if @event contains "WORK-HOLIDAY" {
+                    @special = true
+                    @work = false
+                }
+
+                // 放在后面，让“班”拥有最高优先级。
+                if @event contains "ALTERNATE-WORKDAY" {
+                    @special = true
+                    @work = true
+                }
+            }
+        }
+    }
+}
+
+// 没有官方“班/休”标记时，按普通星期判断。
+if @special == false {
+    @weekday = formatDate(CurrentDate,"Custom","EEEE")
+    const weekend = matchText(
+        '^(星期六|星期日|周六|周日|週六|週日|Saturday|Sunday|土曜日|日曜日)$',
+        "{@weekday}"
+    )
+
+    if weekend {
+        @work = false
+    } else {
+        @work = true
+    }
+}
+
+// ============================================================
+// 2. 解析用户配置
+// ============================================================
+@entries = splitText(@alarmConfig)
+@configuredNames: array
+@alarms = getAlarms()
+
+@alarmTime: text
+@alarmLabel: text
+@managedName: text
+@alarmName: text
+@found: bool
+
+for entry in @entries {
+    const line = trimWhitespace("{@entry}")
+
+    if line != "" {
+        const fields = splitText(line,"|")
+        const fieldCount = count(fields)
+
+        if fieldCount >= 2 {
+            const timeRaw = getListItem(fields,1)
+            const labelRaw = getListItem(fields,2)
+
+            const timeClean = trimWhitespace("{timeRaw}")
+            const labelClean = trimWhitespace("{labelRaw}")
+
+            @alarmTime = "{timeClean}"
+            @alarmLabel = "{labelClean}"
+            @managedName = "节假日-{@alarmTime} {@alarmLabel}"
+
+            // 保存当前有效配置名称，后面用于关闭已移除的旧闹钟。
+            @configuredNames += "{@managedName}"
+            @found = false
+
+            // 查找同名受管闹钟。
+            for alarm in @alarms {
+                const alarmNameRaw = getName(@alarm)
+                @alarmName = "{alarmNameRaw}"
+
+                if @alarmName == @managedName {
+                    @found = true
+
+                    if @work == true {
+                        turnOnAlarm(@alarm,false)
+                    } else {
+                        turnOffAlarm(@alarm,false)
+                    }
+                }
+            }
+
+            // 首次不存在则自动创建；以后不会重复创建。
+            if @found == false {
+                const createdAlarm = createAlarm(
+                    @managedName,
+                    @alarmTime,
+                    true,
+                    @everyDay
+                )
+
+                if @work == true {
+                    turnOnAlarm(createdAlarm,false)
+                } else {
+                    turnOffAlarm(createdAlarm,false)
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// 3. 配置里已经删除的旧闹钟：自动关闭，但不删除
+// 只处理“节假日-”前缀，绝不碰用户其他闹钟。
+// ============================================================
+for oldAlarm in @alarms {
+    const oldNameRaw = getName(@oldAlarm)
+    @alarmName = "{oldNameRaw}"
+
+    if @alarmName beginsWith "节假日-" {
+        if @configuredNames !contains @alarmName {
+            turnOffAlarm(@oldAlarm,false)
+        }
+    }
+}
