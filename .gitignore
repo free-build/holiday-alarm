@@ -1,5 +1,6 @@
 .tools/
-build/
+build/*
+!build/智能节假日闹钟_v4.3.shortcut
 __pycache__/
 */__pycache__/
 src/*_processed.cherri
