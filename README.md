@@ -1,10 +1,10 @@
-# 智能节假日闹钟 v4.3
+# 智能节假日闹钟 v4.4
 
-以用户提供的 Cherri 源码为基础。闹钟配置、创建和开关逻辑保留在 `src/智能节假日闹钟_v4.3.cherri`。运行时的唯一节假日数据源是 iPhone 苹果日历里的“中国大陆节假日”日历。用户提供的原稿保存在 `reference/用户提供的_v4.cherri`。
+以用户提供的 Cherri 源码为基础。闹钟配置、创建和开关逻辑保留在 `src/智能节假日闹钟_v4.4.cherri`。运行时的唯一节假日数据源是 iPhone 苹果日历里的“中国大陆节假日”日历。用户提供的原稿保存在 `reference/用户提供的_v4.cherri`。
 
 ## 直接下载
 
-无需自行编译，可下载已签名的 [智能节假日闹钟_v4.3.shortcut](build/智能节假日闹钟_v4.3.shortcut) 并在 iPhone 上导入。请先在日历 App 中启用“中国大陆节假日”日历。
+无需自行编译，可下载已签名的 [智能节假日闹钟_v4.4.shortcut](build/智能节假日闹钟_v4.4.shortcut) 并在 iPhone 上导入。请先在日历 App 中启用“中国大陆节假日”日历。
 
 ## 配置
 
@@ -12,12 +12,12 @@
 
 ## 构建
 
-运行 `./build.sh --check`，输出 `build/智能节假日闹钟_v4.3_unsigned.shortcut` 和可检查的 plist。需要 Cherri v2.3.0，或通过 `CHERRI_BIN` 指定它。`tools/fix_calendar_filter.py` 修正 Cherri 对苹果日历筛选条件以及时钟“查找闹钟”动作的编码，并补齐闹钟 `label` 属性的原生元数据；`tools/check_plist.py` 校验最终 plist。
+运行 `./build.sh --check`，输出 `build/智能节假日闹钟_v4.4_unsigned.shortcut` 和可检查的 plist。需要 Cherri v2.3.0，或通过 `CHERRI_BIN` 指定它。`tools/fix_calendar_filter.py` 修正 Cherri 对苹果日历筛选条件以及时钟“查找闹钟”动作的编码，并补齐闹钟 `label` 属性的原生元数据；`tools/check_plist.py` 校验最终 plist。
 
-`./build.sh --sign` 会把最终 plist 发送至第三方 HubSign 服务并生成可导入 iPhone 的 `build/智能节假日闹钟_v4.3.shortcut`。未签名文件不能直接导入 iPhone。
+`./build.sh --sign` 会把最终 plist 发送至第三方 HubSign 服务并生成可导入 iPhone 的 `build/智能节假日闹钟_v4.4.shortcut`。未签名文件不能直接导入 iPhone。
 
 ## 验证
 
-Cherri v2.3.0 在 Linux ARM64 上已编译通过；最终 plist 有 203 个动作。日历查询、原生闹钟查找、`label` 读取和批量删除动作已静态验证。所有字符串“如果”比较已改为正则匹配结果判断，构建检查会拒绝带文本比较参数的“如果”动作。尚未在 iPhone 上实机复测；导入后应连续运行两次确认不再创建重复闹钟，再删去一行配置验证对应闹钟会删除。iOS 可能在首次删除闹钟时要求授予删除权限。
+Cherri v2.3.0 在 Linux ARM64 上已编译通过。v4.4 使用完整日期时间判断日历事件与今天是否重叠，兼容全天事件以当天 23:59:59 或次日 00:00:00 结束的两种表示。日历查询、原生闹钟查找、`label` 读取和批量删除动作会在构建时静态验证。导入后应在带“休”和“班”的日期分别实机验证。iOS 可能在首次删除闹钟时要求授予删除权限。
 
 先前离线节假日方案的配置和生成器已清理；当前签名文件由此日历版源码生成。

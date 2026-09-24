@@ -1,0 +1,181 @@
+#define name 智能节假日闹钟 v4.4
+#define color orange
+#define glyph alarmClock
+#define version 18.4
+#define mac false
+
+#include 'actions/calendar'
+#include 'actions/text'
+
+// 用户配置：每行 HH:mm|名称。只更改这里即可增减闹钟。
+@alarmConfig = "08:00|起床
+08:15|二次起床
+13:30|午睡起床"
+@everyDay = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
+
+// 从苹果日历的“中国大陆节假日”日历查找日程。
+// 筛选条件参照用户提供的快捷指令；构建时修复 Cherri 的嵌套字典编码。
+action 'filter.calendarevents' findChinaHolidayEvents(): array {
+    "WFContentItemLimitEnabled": false,
+    "WFContentItemFilter": {
+        "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+                {
+                    "Property": "Calendar",
+                    "Operator": 4,
+                    "Values": {
+                        "Enumeration": {
+                            "Value": "中国大陆节假日",
+                            "WFSerializationType": "WFStringSubstitutableState"
+                        }
+                    },
+                    "Removable": true
+                }
+            ],
+            "WFContentPredicateBoundedDate": false
+        },
+        "WFSerializationType": "WFContentPredicateTableTemplate"
+    }
+}
+const calendarEvents = findChinaHolidayEvents()
+
+// EventKit 在不同系统版本中可能把全天事件的结束时刻表示为当天
+// 23:59:59，或次日 00:00:00。用完整时间判断事件与今天是否重叠，
+// 避免把单日“休”事件误判为不在今天。
+@today = formatDate(CurrentDate,"Custom","yyyyMMdd")
+@todayStartText = "{@today}000000"
+@todayEndText = "{@today}235959"
+@todayStartN = number(@todayStartText)
+@todayEndN = number(@todayEndText)
+@sawHoliday = false
+@sawWorkday = false
+@work = false
+
+for event in calendarEvents {
+    const nameRaw = getEventDetail(@event,"Name")
+    const startRaw = getEventDetail(@event,"Start Date")
+    const endRaw = getEventDetail(@event,"End Date")
+    @eventName = "{nameRaw}"
+    @startText = formatDate(startRaw,"Custom","yyyyMMddHHmmss")
+    @endText = formatDate(endRaw,"Custom","yyyyMMddHHmmss")
+    @startN = number(@startText)
+    @endN = number(@endText)
+
+    // 半开区间重叠判断：[eventStart,eventEnd) 与今天有交集。
+    // 同时兼容当天 23:59:59 和次日 00:00:00 两种全天事件结束值。
+    if @startN <= @todayEndN && @endN > @todayStartN {
+        const holidayMark = matchText('休', "{@eventName}")
+        if holidayMark {
+            @sawHoliday = true
+        }
+        const workdayMark = matchText('班', "{@eventName}")
+        if workdayMark {
+            @sawWorkday = true
+        }
+    }
+}
+
+// 调休补班优先于休假；没有特殊日程时按星期判断。
+if @sawWorkday == true {
+    @work = true
+} else {
+    if @sawHoliday == true {
+        @work = false
+    } else {
+        @weekday = formatDate(CurrentDate,"Custom","EEEE")
+        const weekend = matchText(
+            '^(星期六|星期日|周六|周日|週六|週日|Saturday|Sunday|土曜日|日曜日)$',
+            "{@weekday}"
+        )
+        if weekend {
+            @work = false
+        } else {
+            @work = true
+        }
+    }
+}
+
+// 用户提供的配置驱动闹钟管理逻辑。
+@entries = splitText(@alarmConfig,"\n")
+@configuredNames: array
+@alarms = getAlarms()
+@alarmTime: text
+@alarmLabel: text
+@managedName: text
+@alarmName: text
+@found: bool
+@stillConfigured: bool
+@toDelete: array
+
+for entry in @entries {
+    const line = trimWhitespace("{@entry}")
+    const hasLine = matchText('(?s).+', "{line}")
+    if hasLine {
+        const fields = splitText(line,"|")
+        const fieldCount = count(fields)
+        if fieldCount >= 2 {
+            const timeRaw = getListItem(fields,1)
+            const labelRaw = getListItem(fields,2)
+            const timeClean = trimWhitespace("{timeRaw}")
+            const labelClean = trimWhitespace("{labelRaw}")
+            @alarmTime = "{timeClean}"
+            @alarmLabel = "{labelClean}"
+            @managedName = "节假日-{@alarmTime} {@alarmLabel}"
+            @configuredNames += "{@managedName}"
+            @found = false
+
+            for alarm in @alarms {
+                // iOS 闹钟对象的 Name 可能是时间；创建时的名称存储在 Label。
+                @alarmName = @alarm['label']
+                // 快捷指令的“如果”动作不能可靠显示变量形式的比较值；用固定正则比较两段文本。
+                const sameManagedName = matchText('(?s)^(.+)\n\1$', "{@alarmName}\n{@managedName}")
+                if sameManagedName {
+                    if @found == true {
+                        // 清理旧版本反复运行产生的同标签重复闹钟。
+                        @toDelete += @alarm
+                    } else {
+                        @found = true
+                        if @work == true {
+                            turnOnAlarm(@alarm,false)
+                        } else {
+                            turnOffAlarm(@alarm,false)
+                        }
+                    }
+                }
+            }
+            if @found == false {
+                const createdAlarm = createAlarm(@managedName,@alarmTime,true,@everyDay)
+                if @work == true {
+                    turnOnAlarm(createdAlarm,false)
+                } else {
+                    turnOffAlarm(createdAlarm,false)
+                }
+            }
+        }
+    }
+}
+
+// 删除配置已移除的受管闹钟；不碰其他名称的闹钟。
+for oldAlarm in @alarms {
+    @alarmName = @oldAlarm['label']
+    const managedPrefix = matchText('^节假日-', "{@alarmName}")
+    if managedPrefix {
+        @stillConfigured = false
+        for configuredName in @configuredNames {
+            const sameConfiguredName = matchText('(?s)^(.+)\n\1$', "{@alarmName}\n{@configuredName}")
+            if sameConfiguredName {
+                @stillConfigured = true
+            }
+        }
+        if @stillConfigured == false {
+            @toDelete += @oldAlarm
+        }
+    }
+}
+
+// 一次提交待删除的闹钟，避免对每个旧闹钟分别触发删除确认。
+@deleteCount = count(@toDelete)
+if @deleteCount > 0 {
+    deleteAlarm(@toDelete)
+}

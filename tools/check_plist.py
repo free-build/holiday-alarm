@@ -21,6 +21,43 @@ assert len(templates) == 1
 t = templates[0]
 assert (t['Property'], t['Operator'], t['Values']['Enumeration']['Value']) == ('Calendar', 4, '中国大陆节假日')
 assert 'WFDictionaryFieldValueItems' not in str(filt)
+
+# v4.4 must retain seconds when comparing calendar ranges. EventKit may expose
+# an all-day event end as either 23:59:59 on the same day or 00:00:00 on the
+# following day; reducing it to yyyyMMdd loses the distinction.
+date_formats = [
+    action['WFWorkflowActionParameters'].get('WFDateFormat')
+    for action in actions
+    if action['WFWorkflowActionIdentifier'] == 'is.workflow.actions.format.date'
+]
+assert date_formats.count('yyyyMMddHHmmss') == 2, date_formats
+range_conditions = [
+    action['WFWorkflowActionParameters']['WFConditions']['Value'][
+        'WFActionParameterFilterTemplates'
+    ]
+    for action in actions
+    if action['WFWorkflowActionIdentifier'] == 'is.workflow.actions.conditional'
+    and 'WFConditions' in action.get('WFWorkflowActionParameters', {})
+]
+assert len(range_conditions) == 1
+range_conditions = range_conditions[0]
+assert [item['WFCondition'] for item in range_conditions] == [1, 2]
+assert [
+    item['WFInput']['Variable']['Value']['VariableName']
+    for item in range_conditions
+] == ['startN', 'endN']
+assert [
+    item['WFNumberValue']['Value']['VariableName']
+    for item in range_conditions
+] == ['todayEndN', 'todayStartN']
+
+def overlaps_today(start: int, end: int, day: int = 20260925) -> bool:
+    return start <= int(f'{day}235959') and end > int(f'{day}000000')
+
+assert overlaps_today(20260925000000, 20260925235959)  # modern EventKit
+assert overlaps_today(20260925000000, 20260926000000)  # legacy exclusive end
+assert not overlaps_today(20260924000000, 20260925000000)
+assert not overlaps_today(20260926000000, 20260926235959)
 assert ids.count('com.apple.mobiletimer-framework.MobileTimerIntents.MTCreateAlarmIntent') == 1
 assert ids.count('com.apple.clock.DeleteAlarmIntent') == 1
 get_alarms = [
