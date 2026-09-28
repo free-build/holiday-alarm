@@ -7,9 +7,10 @@ import urllib.request
 
 source = pathlib.Path(sys.argv[1])
 target = pathlib.Path(sys.argv[2])
+shortcut_name = sys.argv[3] if len(sys.argv) > 3 else source.stem
 request = urllib.request.Request(
     'https://hubsign.routinehub.services/sign',
-    data=json.dumps({'shortcutName': '智能节假日闹钟 v4.4', 'shortcut': source.read_text(encoding='utf-8')}).encode(),
+    data=json.dumps({'shortcutName': shortcut_name, 'shortcut': source.read_text(encoding='utf-8')}).encode(),
     headers={'Content-Type': 'application/json', 'User-Agent': 'cherri/v2.3.0'},
     method='POST',
 )

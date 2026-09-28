@@ -1,8 +1,9 @@
 .tools/
 build/*
-!build/智能节假日闹钟_v4.4.shortcut
+!build/智能节假日闹钟_v6.2_本地诊断版.shortcut
 __pycache__/
 */__pycache__/
 src/*_processed.cherri
 src/*.plist
 src/*.shortcut
+debug-logs/
