@@ -82,6 +82,23 @@ for identifier, (intent, expected_count) in mobiletimer_expectations.items():
             'Name': '时钟',
             'AppIntentIdentifier': intent,
         }
+sleep_alarm_actions = [
+    action for action in actions
+    if action['WFWorkflowActionIdentifier']
+    == 'com.apple.mobiletimer.EditSleepAlarmIntent'
+]
+assert len(sleep_alarm_actions) == 3
+assert {
+    action['WFWorkflowActionParameters']['operation']
+    for action in sleep_alarm_actions
+} == {'toggle', 'skip', 'unskip'}
+for action in sleep_alarm_actions:
+    assert action['WFWorkflowActionParameters']['AppIntentDescriptor'] == {
+        'TeamIdentifier': '0000000000',
+        'BundleIdentifier': 'com.apple.mobiletimer',
+        'Name': '时钟',
+        'AppIntentIdentifier': 'EditSleepAlarmIntent',
+    }
 delete_actions = [
     action for action in actions
     if action['WFWorkflowActionIdentifier'] == 'com.apple.clock.DeleteAlarmIntent'
@@ -160,6 +177,18 @@ config_texts = [
     if action['WFWorkflowActionIdentifier'] == 'is.workflow.actions.gettext'
 ]
 assert any(text and text.endswith('\n|测试日期') for text in config_texts)
+alarm_configs = [
+    item for item in config_texts
+    if isinstance(item, str)
+    and item.startswith('08:00|起床\n')
+    and item.endswith('\n|测试日期')
+]
+assert len(alarm_configs) == 1
+assert '\n调试日志|关\n' in alarm_configs[0]
+assert '\n调试日志|开\n' not in alarm_configs[0]
+project_info = '作者：GetFreedomPro\nGitHub：https://github.com/free-build/holiday-alarm'
+assert config_texts.count(project_info) == 1
+assert project_info not in alarm_configs[0]
 text = path.read_text(encoding='utf-8')
 assert 'sawSpecial' not in text
 assert 'calendars.icloud.com' not in text

@@ -1,0 +1,315 @@
+#define name 智能节假日闹钟 v6.4
+#define color orange
+#define glyph alarmClock
+#define version 18.4
+#define mac false
+
+#include 'actions/calendar'
+#include 'actions/sharing'
+#include 'actions/text'
+
+// 用户配置：每行 HH:mm|名称。只更改这里即可增减闹钟。
+@alarmConfig = "08:00|起床
+08:15|二次起床
+13:30|午睡起床
+调试日志|关
+|测试日期"
+
+// 项目信息：独立文本块，不参与上方配置解析。
+text("作者：GetFreedomPro
+GitHub：https://github.com/free-build/holiday-alarm")
+
+@everyDay = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
+
+// 接受“yyMMdd”或“yyMMdd|测试日期”；“|测试日期”表示真实今天。
+// 该行不会被当成闹钟。测试模式不改变系统日期。
+@entries = splitText(@alarmConfig,"\n")
+@testDate = ""
+// 默认关闭；只有明确配置“调试日志|开”才启用剪贴板诊断日志。
+@debugEnabled = false
+for configEntry in @entries {
+    const configLine = trimWhitespace("{@configEntry}")
+    const testDateLine = matchText('^([0-9]{6})(\|测试日期)?$', "{configLine}")
+    if testDateLine {
+        const testDateRaw = getMatchGroup(testDateLine,1)
+        @testDate = "{testDateRaw}"
+    }
+    const debugLine = matchText('^调试日志\|开$', "{configLine}")
+    if debugLine {
+        @debugEnabled = true
+    }
+    const debugOffLine = matchText('^调试日志\|关$', "{configLine}")
+    if debugOffLine {
+        @debugEnabled = false
+    }
+}
+
+// 从苹果日历的“中国大陆节假日”日历查找当前仍有效的特殊日程。
+// 构建脚本会按用户提供的 iCloud 快捷指令写入四个原生筛选条件：
+// 开始日期在过去 10 天内、日历匹配、结束日期晚于当前日期。
+// 不按名称预筛选，确保同一天的多条事件都会进入后面的“班/休”扫描。
+action 'filter.calendarevents' findCurrentChinaHolidayEvents(): array {
+    "WFContentItemLimitEnabled": false,
+    "WFContentItemFilter": {
+        "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+                {
+                    "Property": "Calendar",
+                    "Operator": 4,
+                    "Values": {
+                        "Enumeration": {
+                            "Value": "中国大陆节假日",
+                            "WFSerializationType": "WFStringSubstitutableState"
+                        }
+                    },
+                    "Removable": true
+                }
+            ],
+            "WFContentPredicateBoundedDate": false
+        },
+        "WFSerializationType": "WFContentPredicateTableTemplate"
+    }
+}
+
+// 测试模式只取测试月份附近的事件，再在本地用年月日精确筛选。
+action 'filter.calendarevents' findTestChinaHolidayEvents(): array {
+    "WFContentItemLimitEnabled": false,
+    "WFContentItemFilter": {
+        "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+                {
+                    "Property": "Calendar",
+                    "Operator": 4,
+                    "Values": {
+                        "Enumeration": {
+                            "Value": "中国大陆节假日",
+                            "WFSerializationType": "WFStringSubstitutableState"
+                        }
+                    },
+                    "Removable": true
+                }
+            ],
+            "WFContentPredicateBoundedDate": false
+        },
+        "WFSerializationType": "WFContentPredicateTableTemplate"
+    }
+}
+
+const testDateMatch = matchText('^[0-9]{6}$', @testDate)
+@calendarEvents: array
+@testMode = false
+@targetDateN = 0
+@fallbackWeekday = formatDate(CurrentDate,"Custom","EEEE")
+@decisionDate = formatDate(CurrentDate,"Custom","yyyy-MM-dd")
+@queryMode = "真实今天"
+if testDateMatch {
+    @testMode = true
+    const testDateParts = matchText('^([0-9]{2})([0-9]{2})([0-9]{2})$', @testDate)
+    const testYear = getMatchGroup(testDateParts,1)
+    const testMonth = getMatchGroup(testDateParts,2)
+    const testDay = getMatchGroup(testDateParts,3)
+    @testDateISO = "20{testYear}-{testMonth}-{testDay} 00:00"
+    const testStartDate = date(@testDateISO)
+    @testMonthStartISO = "20{testYear}-{testMonth}-01 00:00"
+    const testMonthStartDate = date(@testMonthStartISO)
+    // 向前覆盖 10 天，确保月初仍能命中上月开始、延续到本月的全天事件。
+    const testQueryStartDate = adjustDate(testMonthStartDate,"Subtract",qty(10,"days"))
+    const testQueryEndDate = adjustDate(testMonthStartDate,"Add",qty(1,"months"))
+    @targetDateText = "20{@testDate}"
+    @targetDateN = number(@targetDateText)
+    @fallbackWeekday = formatDate(testStartDate,"Custom","EEEE")
+    @decisionDate = formatDate(testStartDate,"Custom","yyyy-MM-dd")
+    @queryMode = "测试日期"
+    const testCalendarEvents = findTestChinaHolidayEvents()
+    @calendarEvents = testCalendarEvents
+} else {
+    const currentCalendarEvents = findCurrentChinaHolidayEvents()
+    @calendarEvents = currentCalendarEvents
+}
+
+@eventCount = count(@calendarEvents)
+@debugLog = "智能节假日闹钟 v6.4 本地诊断日志
+配置原文：
+{@alarmConfig}
+解析出的测试日期：{@testDate}
+模式：{@queryMode}
+判断日期：{@decisionDate}
+星期文本：{@fallbackWeekday}
+日历返回数量：{@eventCount}"
+
+@sawRestday = false
+@sawWorkday = false
+@work = false
+@eventIndex = 0
+@dateMatchedCount = 0
+
+for event in @calendarEvents {
+    @eventIndex += 1
+    const nameRaw = getEventDetail(@event,"Name")
+    const eventStartRaw = getEventDetail(@event,"Start Date")
+    const eventEndRaw = getEventDetail(@event,"End Date")
+    @eventName = "{nameRaw}"
+    @eventStartDebug = formatDate(eventStartRaw,"Custom","yyyy-MM-dd HH:mm:ss")
+    @eventEndDebug = formatDate(eventEndRaw,"Custom","yyyy-MM-dd HH:mm:ss")
+    @eventStartDateText = formatDate(eventStartRaw,"Custom","yyyyMMdd")
+    @eventEndDateText = formatDate(eventEndRaw,"Custom","yyyyMMdd")
+    @eventStartDateN = number(@eventStartDateText)
+    @eventEndDateN = number(@eventEndDateText)
+    @eventApplies = false
+    if @testMode == true {
+        // iPhone 实测全天事件结束值为最后一天 23:59:59，因此年月日两端均包含。
+        if @eventStartDateN <= @targetDateN {
+            if @eventEndDateN >= @targetDateN {
+                @eventApplies = true
+            }
+        }
+    } else {
+        @eventApplies = true
+    }
+    // 只识别当天事件名称中的“班”和“休”，不判断节日名称。
+    if @eventApplies == true {
+        @dateMatchedCount += 1
+        const workdayMark = matchText('班', "{@eventName}")
+        if workdayMark {
+            @sawWorkday = true
+        }
+        const restdayMark = matchText('休', "{@eventName}")
+        if restdayMark {
+            @sawRestday = true
+        }
+        @debugLog = "{@debugLog}
+事件 #{@eventIndex}：{@eventName}
+  开始：{@eventStartDebug}
+  结束：{@eventEndDebug}
+  班匹配：{workdayMark}
+  休匹配：{restdayMark}"
+    }
+}
+
+// “班”优先；其次识别“休”；两者都没有才按当天星期判断。
+if @sawWorkday == true {
+    @work = true
+} else {
+    if @sawRestday == true {
+        @work = false
+    } else {
+        const weekend = matchText(
+            '^(星期六|星期日|周六|周日|週六|週日|Saturday|Sunday|土曜日|日曜日)$',
+            "{@fallbackWeekday}"
+        )
+        if weekend {
+            @work = false
+        } else {
+            @work = true
+        }
+    }
+}
+
+@debugLog = "{@debugLog}
+日期命中数量：{@dateMatchedCount}
+汇总：班={@sawWorkday}，休={@sawRestday}，最终工作={@work}"
+
+// “查找闹钟”不返回健康 App 的睡眠闹钟，先用原生“切换”取得下一次睡眠闹钟。
+// 没有返回实体时直接跳过；有实体时立即写入最终状态，不保留探测时的切换结果。
+@sleepAlarmFound: bool
+@sleepAlarmFound = false
+const sleepAlarmProbe = rawAction("com.apple.mobiletimer.EditSleepAlarmIntent", {"operation": "toggle"})
+if sleepAlarmProbe {
+    @sleepAlarmFound = true
+    if @work == true {
+        rawAction("com.apple.mobiletimer.EditSleepAlarmIntent", {"operation": "unskip"})
+    } else {
+        rawAction("com.apple.mobiletimer.EditSleepAlarmIntent", {"operation": "skip"})
+    }
+}
+
+@debugLog = "{@debugLog}
+睡眠闹钟命中：{@sleepAlarmFound}"
+
+@configuredNames: array
+@alarms = getAlarms()
+@alarmTime: text
+@alarmLabel: text
+@managedName: text
+@alarmName: text
+@found: bool
+@stillConfigured: bool
+@toDelete: array
+
+for entry in @entries {
+    const line = trimWhitespace("{@entry}")
+    const alarmLine = matchText('^(?:[01]\d|2[0-3]):[0-5]\d\|.+$', "{line}")
+    if alarmLine {
+        const fields = splitText(line,"|")
+        const fieldCount = count(fields)
+        if fieldCount >= 2 {
+            const timeRaw = getListItem(fields,1)
+            const labelRaw = getListItem(fields,2)
+            const timeClean = trimWhitespace("{timeRaw}")
+            const labelClean = trimWhitespace("{labelRaw}")
+            @alarmTime = "{timeClean}"
+            @alarmLabel = "{labelClean}"
+            @managedName = "节假日-{@alarmTime} {@alarmLabel}"
+            @configuredNames += "{@managedName}"
+            @found = false
+
+            for alarm in @alarms {
+                @alarmName = @alarm['label']
+                const sameManagedName = matchText('(?s)^(.+)\n\1$', "{@alarmName}\n{@managedName}")
+                if sameManagedName {
+                    if @found == true {
+                        @toDelete += @alarm
+                    } else {
+                        @found = true
+                        if @work == true {
+                            turnOnAlarm(@alarm,false)
+                        } else {
+                            turnOffAlarm(@alarm,false)
+                        }
+                    }
+                }
+            }
+            if @found == false {
+                const createdAlarm = createAlarm(@managedName,@alarmTime,true,@everyDay)
+                if @work == true {
+                    turnOnAlarm(createdAlarm,false)
+                } else {
+                    turnOffAlarm(createdAlarm,false)
+                }
+            }
+        }
+    }
+}
+
+for oldAlarm in @alarms {
+    @alarmName = @oldAlarm['label']
+    const managedPrefix = matchText('^节假日-', "{@alarmName}")
+    if managedPrefix {
+        @stillConfigured = false
+        for configuredName in @configuredNames {
+            const sameConfiguredName = matchText('(?s)^(.+)\n\1$', "{@alarmName}\n{@configuredName}")
+            if sameConfiguredName {
+                @stillConfigured = true
+            }
+        }
+        if @stillConfigured == false {
+            @toDelete += @oldAlarm
+        }
+    }
+}
+
+@deleteCount = count(@toDelete)
+if @deleteCount > 0 {
+    deleteAlarm(@toDelete)
+}
+
+@configuredCount = count(@configuredNames)
+@debugLog = "{@debugLog}
+受管闹钟数量：{@configuredCount}
+待删除数量：{@deleteCount}"
+if @debugEnabled == true {
+    setClipboard(@debugLog,false)
+    show(@debugLog)
+}
