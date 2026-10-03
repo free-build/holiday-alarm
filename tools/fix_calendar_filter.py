@@ -169,33 +169,15 @@ def main() -> None:
         )
 
     # Sleep Schedule wake-up alarms are separate from regular Clock alarms.
-    # Apple's Edit Sleep Alarm action skips or unskips only the next wake-up
-    # alarm. Attach the provider descriptor so it imports as a native action.
-    # Cherri keeps an assigned rawAction under its placeholder identifier.
-    # Rewrite only the named probe; its UUID/output wiring is already valid.
-    sleep_alarm_probes = [
-        action for action in actions
-        if action["WFWorkflowActionIdentifier"] == "is.workflow.actions.rawaction"
-        and action.get("WFWorkflowActionParameters", {}).get("CustomOutputName")
-        == "sleepAlarmProbe"
-        and action["WFWorkflowActionParameters"].get("operation") == "toggle"
-    ]
-    if len(sleep_alarm_probes) != 1:
-        raise SystemExit(
-            f"Expected one Sleep Alarm probe, found {len(sleep_alarm_probes)}"
-        )
-    sleep_alarm_probes[0]["WFWorkflowActionIdentifier"] = (
-        "com.apple.mobiletimer.EditSleepAlarmIntent"
-    )
-
+    # Attach the provider descriptor to the two explicitly enabled actions.
     sleep_alarm_actions = [
         action for action in actions
         if action["WFWorkflowActionIdentifier"]
         == "com.apple.mobiletimer.EditSleepAlarmIntent"
     ]
-    if len(sleep_alarm_actions) != 3:
+    if len(sleep_alarm_actions) != 2:
         raise SystemExit(
-            f"Expected three Edit Sleep Alarm actions, found {len(sleep_alarm_actions)}"
+            f"Expected two Edit Sleep Alarm actions, found {len(sleep_alarm_actions)}"
         )
     for action in sleep_alarm_actions:
         action["WFWorkflowActionParameters"]["AppIntentDescriptor"] = {

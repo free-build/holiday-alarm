@@ -87,11 +87,59 @@ sleep_alarm_actions = [
     if action['WFWorkflowActionIdentifier']
     == 'com.apple.mobiletimer.EditSleepAlarmIntent'
 ]
-assert len(sleep_alarm_actions) == 3
+assert len(sleep_alarm_actions) == 2
 assert {
     action['WFWorkflowActionParameters']['operation']
     for action in sleep_alarm_actions
-} == {'toggle', 'skip', 'unskip'}
+} == {'skip', 'unskip'}
+
+# Both actions must stay inside the explicit sleepAlarmEnabled condition. With
+# its default false value, an iPhone without a Sleep Schedule never invokes
+# Edit Sleep Alarm and therefore cannot show the blocking system alert.
+sleep_guard_start = next(
+    index
+    for index, action in enumerate(actions)
+    if action['WFWorkflowActionIdentifier'] == 'is.workflow.actions.conditional'
+    and action.get('WFWorkflowActionParameters', {}).get('WFControlFlowMode') == 0
+    and 'sleepAlarmEnabled' in str(action['WFWorkflowActionParameters'].get('WFInput'))
+)
+sleep_guard_group = actions[sleep_guard_start]['WFWorkflowActionParameters'][
+    'GroupingIdentifier'
+]
+sleep_guard_end = next(
+    index
+    for index in range(sleep_guard_start + 1, len(actions))
+    if actions[index]['WFWorkflowActionIdentifier'] == 'is.workflow.actions.conditional'
+    and actions[index].get('WFWorkflowActionParameters', {}).get('WFControlFlowMode') == 2
+    and actions[index]['WFWorkflowActionParameters'].get('GroupingIdentifier')
+    == sleep_guard_group
+)
+sleep_alarm_indexes = [
+    index
+    for index, action in enumerate(actions)
+    if action['WFWorkflowActionIdentifier']
+    == 'com.apple.mobiletimer.EditSleepAlarmIntent'
+]
+assert all(sleep_guard_start < index < sleep_guard_end for index in sleep_alarm_indexes)
+weekend_guard_start = next(
+    index
+    for index in range(sleep_guard_start + 1, sleep_guard_end)
+    if actions[index]['WFWorkflowActionIdentifier'] == 'is.workflow.actions.conditional'
+    and actions[index].get('WFWorkflowActionParameters', {}).get('WFControlFlowMode') == 0
+    and 'isWeekend' in str(actions[index]['WFWorkflowActionParameters'].get('WFInput'))
+)
+weekend_guard_params = actions[weekend_guard_start]['WFWorkflowActionParameters']
+assert weekend_guard_params['WFNumberValue'] == 0
+weekend_guard_group = weekend_guard_params['GroupingIdentifier']
+weekend_guard_end = next(
+    index
+    for index in range(weekend_guard_start + 1, sleep_guard_end)
+    if actions[index]['WFWorkflowActionIdentifier'] == 'is.workflow.actions.conditional'
+    and actions[index].get('WFWorkflowActionParameters', {}).get('WFControlFlowMode') == 2
+    and actions[index]['WFWorkflowActionParameters'].get('GroupingIdentifier')
+    == weekend_guard_group
+)
+assert all(weekend_guard_start < index < weekend_guard_end for index in sleep_alarm_indexes)
 for action in sleep_alarm_actions:
     assert action['WFWorkflowActionParameters']['AppIntentDescriptor'] == {
         'TeamIdentifier': '0000000000',
@@ -171,6 +219,8 @@ assert patterns_by_name['testDateLine'] == r'^([0-9]{6})(\|测试日期)?$'
 assert patterns_by_name['alarmLine'] == r'^(?:[01]\d|2[0-3]):[0-5]\d\|.+$'
 assert patterns_by_name['workdayMark'] == '班'
 assert patterns_by_name['restdayMark'] == '休'
+assert patterns_by_name['sleepAlarmOnLine'] == r'^睡眠闹钟\|开$'
+assert patterns_by_name['sleepAlarmOffLine'] == r'^睡眠闹钟\|关$'
 config_texts = [
     action['WFWorkflowActionParameters'].get('WFTextActionText')
     for action in actions
@@ -186,6 +236,8 @@ alarm_configs = [
 assert len(alarm_configs) == 1
 assert '\n调试日志|关\n' in alarm_configs[0]
 assert '\n调试日志|开\n' not in alarm_configs[0]
+assert '\n睡眠闹钟|关\n' in alarm_configs[0]
+assert '\n睡眠闹钟|开\n' not in alarm_configs[0]
 project_info = '作者：GetFreedomPro\nGitHub：https://github.com/free-build/holiday-alarm'
 assert config_texts.count(project_info) == 1
 assert project_info not in alarm_configs[0]

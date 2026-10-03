@@ -2,7 +2,7 @@
 set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 build_dir="$project_dir/build"
-source_file="$project_dir/src/智能节假日闹钟_v6.4.cherri"
+source_file="$project_dir/src/智能节假日闹钟_v6.6.cherri"
 compiler="${CHERRI_BIN:-$project_dir/.tools/cherri}"
 mode="${1:---check}"
 if [[ "$mode" != "--check" && "$mode" != "--sign" ]]; then
@@ -14,11 +14,11 @@ if [[ ! -x "$compiler" || "$("$compiler" -v)" != *"v2.3.0"* ]]; then
   exit 1
 fi
 mkdir -p "$build_dir"
-cp "$source_file" "$build_dir/智能节假日闹钟_v6.4.cherri"
+cp "$source_file" "$build_dir/智能节假日闹钟_v6.6.cherri"
 cd "$build_dir"
-plist="智能节假日闹钟 v6.4.plist"
+plist="智能节假日闹钟 v6.6.plist"
 rm -f "$plist"
-"$compiler" "智能节假日闹钟_v6.4.cherri" --debug --skip-sign --no-ansi > compile.log 2>&1
+"$compiler" "智能节假日闹钟_v6.6.cherri" --debug --skip-sign --no-ansi > compile.log 2>&1
 if [[ ! -f "$plist" ]]; then
   tail -80 compile.log >&2
   echo "Cherri 未生成目标 plist。" >&2
@@ -26,9 +26,9 @@ if [[ ! -f "$plist" ]]; then
 fi
 python3 "$project_dir/tools/fix_calendar_filter.py" "$plist"
 python3 "$project_dir/tools/check_plist.py" "$plist"
-cp "$plist" "智能节假日闹钟_v6.4_unsigned.shortcut"
-rm -f "智能节假日闹钟 v6.4_unsigned.shortcut"
+cp "$plist" "智能节假日闹钟_v6.6_unsigned.shortcut"
+rm -f "智能节假日闹钟 v6.6_unsigned.shortcut"
 if [[ "$mode" == "--sign" ]]; then
-  python3 "$project_dir/tools/sign.py" "$plist" "智能节假日闹钟_v6.4.shortcut" "智能节假日闹钟 v6.4"
+  python3 "$project_dir/tools/sign.py" "$plist" "智能节假日闹钟_v6.6.shortcut" "智能节假日闹钟 v6.6"
 fi
 echo "构建完成: $build_dir"
